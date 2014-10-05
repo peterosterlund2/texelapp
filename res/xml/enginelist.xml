@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<enginelist>
+    <engine
+        name="Texel 1.05a8"
+        filename="libtexel.so"
+        target="armeabi-v7a"/>
+</enginelist>
