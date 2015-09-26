@@ -4,7 +4,7 @@ TX_SRC	:= bitBoard.cpp book.cpp computerPlayer.cpp enginecontrol.cpp endGameEval
 	   game.cpp history.cpp humanPlayer.cpp killerTable.cpp kpkTable.cpp \
 	   krkpTable.cpp krpkrTable.cpp material.cpp move.cpp moveGen.cpp numa.cpp parameters.cpp \
 	   parallel.cpp piece.cpp position.cpp search.cpp tbprobe.cpp texel.cpp textio.cpp \
-	   transpositionTable.cpp treeLogger.cpp tuigame.cpp uciprotocol.cpp \
+	   polyglot.cpp transpositionTable.cpp tbgen.cpp treeLogger.cpp tuigame.cpp uciprotocol.cpp \
 	   util/logger.cpp util/random.cpp util/timeUtil.cpp util/util.cpp \
 	   syzygy/rtb-probe.cpp
 

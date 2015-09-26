@@ -94,7 +94,7 @@ Search::setStrength(int strength, U64 randomSeed) {
 
 Move
 Search::iterativeDeepening(const MoveList& scMovesIn,
-                           int maxDepth, U64 initialMaxNodes,
+                           int maxDepth, S64 initialMaxNodes,
                            bool verbose, int maxPV, bool onlyExact,
                            int minProbeDepth) {
     tStart = currentTimeMillis();
@@ -113,6 +113,9 @@ Search::iterativeDeepening(const MoveList& scMovesIn,
     const bool smp = pd.numHelperThreads() > 0;
     maxNodes = initialMaxNodes;
     this->minProbeDepth = (TBProbe::tbEnabled() ? minProbeDepth : MAX_SEARCH_DEPTH) * plyScale;
+    if ((maxDepth < 0) && (maxNodes < 0) && !TBProbe::tbEnabled())
+        if (tt.updateTB(pos, maxTimeMillis))
+            this->minProbeDepth = 1; // In-memory on-demand tables can be probed aggressively
     std::vector<MoveInfo> rootMoves;
     getRootMoves(scMovesIn, rootMoves, maxDepth);
 
@@ -125,7 +128,7 @@ Search::iterativeDeepening(const MoveList& scMovesIn,
         maxDepth = MAX_SEARCH_DEPTH;
     maxPV = std::min(maxPV, (int)rootMoves.size());
     for (size_t i = 0; i < COUNT_OF(searchTreeInfo); i++) {
-        searchTreeInfo[i].allowNullMove = true;
+        searchTreeInfo[i].allowNullMove = UciParams::useNullMove->getBoolPar();
         searchTreeInfo[i].singularMove.setMove(0,0,0,0);
     }
     ht.reScale();
@@ -307,7 +310,7 @@ Search::storeSearchResult(std::vector<MoveInfo>& scMoves, int mi, int depth,
     scMoves[mi].pv.clear();
     tt.extractPVMoves(pos, scMoves[mi].move, scMoves[mi].pv);
     if ((maxTimeMillis < 0) && SearchConst::isWinScore(std::abs(score)))
-        TBProbe::extendPV(pos, scMoves[mi].pv);
+        TBProbe::extendPV(pos, scMoves[mi].pv, tt);
 }
 
 void
@@ -384,6 +387,7 @@ Search::notifyPV(const MoveInfo& info, int multiPVIndex) {
     int nps = (time > 0) ? (int)(totNodes / (time / 1000.0)) : 0;
     listener->notifyPV(info.depth/plyScale, score, time, totNodes, nps, isMate,
                        uBound, lBound, info.pv, multiPVIndex, tbHits);
+    tLastStats = tNow;
 }
 
 void
@@ -411,6 +415,44 @@ Search::shouldStop() {
     return false;
 }
 
+class FailHighException {
+public:
+    FailHighException(int ply0, int moveNo0, int score0, int posHashListSize0)
+        : ply(ply0), moveNo(moveNo0), score(score0), posHashListSize(posHashListSize0) {}
+    int getPly() const { return ply; }
+    int getMoveNo() const { return moveNo; }
+    int getScore() const { return score; }
+    int getPosHashListSize() const { return posHashListSize; }
+private:
+    const int ply;
+    const int moveNo;
+    const int score;
+    const int posHashListSize;
+};
+
+void
+Search::checkHelperFailHigh() const {
+    if (pd.getHelperFailHigh(threadNo)) {
+        pd.setHelperFailHigh(threadNo, false);
+        bool first = true;
+        for (const auto& sp : spVec) {
+            if (first) { // "rootSp" not owned by this thread
+                first = false;
+                continue;
+            }
+            int nMoves = sp->getNumSpMoves();
+            int beta = sp->getBeta();
+            for (int i = 0; i < nMoves; i++) {
+                const SplitPointMove& spm = sp->getSpMove(i);
+                int score = spm.getScore();
+                static_assert(UNKNOWN_SCORE < -MATE0, "UNKNOWN_SCORE too large");
+                if (score >= beta)
+                    throw FailHighException(sp->getPly(), i, score, sp->getPosHashListSize());
+            }
+        }
+    }
+}
+
 template <bool smp, bool tb>
 int
 Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
@@ -432,6 +474,7 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
         if (stopHandler->shouldStop())
             throw StopSearch();
     }
+    checkHelperFailHigh();
 
     // Collect statistics
     if (verbose) {
@@ -497,7 +540,7 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
     if (tb && depth >= minProbeDepth && !singularSearch) {
         TranspositionTable::TTEntry tbEnt;
         tbEnt.clear();
-        if (TBProbe::tbProbe(pos, ply, alpha, beta, tbEnt)) {
+        if (TBProbe::tbProbe(pos, ply, alpha, beta, tt, tbEnt)) {
             tbHits++;
             nodesToGo -= 1000;
             int type = tbEnt.getType();
@@ -639,8 +682,10 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
                 pos.setEpSquare(-1);
                 searchTreeInfo[ply+1].allowNullMove = false;
                 searchTreeInfo[ply+1].bestMove.setMove(0,0,0,0);
+                auto guard = finally([this,ply]() {
+                    searchTreeInfo[ply+1].allowNullMove = true;
+                });
                 score = -negaScout(smp, tb, -beta, -(beta - 1), ply + 1, depth - R, -1, false);
-                searchTreeInfo[ply+1].allowNullMove = true;
                 pos.setEpSquare(epSquare);
                 pos.setWhiteMove(!pos.isWhiteMove());
             }
@@ -648,6 +693,7 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
             if ((score >= beta) && (depth >= 10 * plyScale)) {
                 // Null-move verification search
                 SearchTreeInfo& sti2 = searchTreeInfo[ply-1];
+                SearchTreeInfo& sti3 = searchTreeInfo[ply+1];
                 const Move savedMove = sti2.currentMove;
                 const int savedMoveNo = sti2.currentMoveNo;
                 const S64 savedNodeIdx2 = sti2.nodeIdx;
@@ -656,13 +702,15 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
                 sti2.nodeIdx = sti.nodeIdx;
                 const S64 savedNodeIdx = sti.nodeIdx;
                 sti.allowNullMove = false;
+                auto guard = finally([&]() {
+                    sti.allowNullMove = true;
+                    sti.nodeIdx = savedNodeIdx;
+                    sti2.currentMove = savedMove;
+                    sti2.currentMoveNo = savedMoveNo;
+                    sti2.nodeIdx = savedNodeIdx2;
+                    sti3.bestMove.setMove(0,0,0,0);
+                });
                 score = negaScout(smp, tb, beta - 1, beta, ply, depth - R, recaptureSquare, inCheck);
-                sti.allowNullMove = true;
-                sti.nodeIdx = savedNodeIdx;
-                sti2.currentMove = savedMove;
-                sti2.currentMoveNo = savedMoveNo;
-                sti2.nodeIdx = savedNodeIdx2;
-                searchTreeInfo[ply+1].bestMove.setMove(0,0,0,0);
                 storeInHash = false;
             }
             if (smp && (depth - R >= MIN_SMP_DEPTH * plyScale))
@@ -699,22 +747,21 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
         bool isPv = beta > alpha + 1;
         if (isPv || (depth > 8 * plyScale)) {
             SearchTreeInfo& sti2 = searchTreeInfo[ply-1];
-            Move savedMove = sti2.currentMove;
-            int savedMoveNo = sti2.currentMoveNo;
-            S64 savedNodeIdx2 = sti2.nodeIdx;
+            const Move savedMove = sti2.currentMove;
+            const int savedMoveNo = sti2.currentMoveNo;
+            const S64 savedNodeIdx2 = sti2.nodeIdx;
             sti2.currentMove = Move(1,1,0); // Represents "no move"
             sti2.currentMoveNo = -1;
             sti2.nodeIdx = sti.nodeIdx;
-
-            S64 savedNodeIdx = sti.nodeIdx;
+            const S64 savedNodeIdx = sti.nodeIdx;
+            auto guard = finally([&]() {
+                sti.nodeIdx = savedNodeIdx;
+                sti2.currentMove = savedMove;
+                sti2.currentMoveNo = savedMoveNo;
+                sti2.nodeIdx = savedNodeIdx2;
+            });
             int newDepth = isPv ? depth  - 2 * plyScale : depth * 3 / 8;
             negaScout(smp, tb, alpha, beta, ply, newDepth, -1, inCheck);
-            sti.nodeIdx = savedNodeIdx;
-
-            sti2.currentMove = savedMove;
-            sti2.currentMoveNo = savedMoveNo;
-            sti2.nodeIdx = savedNodeIdx2;
-
             tt.probe(hKey, ent);
             if (ent.getType() != TType::T_EMPTY)
                 ent.getMove(hashMove);
@@ -738,34 +785,34 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
     // Handle singular extension
     bool singularExtend = false;
     if ((depth > 6 * plyScale) && (posExtend == 0) &&
-            hashMoveSelected && sti.singularMove.isEmpty() &&
+            hashMoveSelected && !singularSearch &&
             (ent.getType() != TType::T_LE) &&
             (ent.getDepth() >= depth - 3 * plyScale) &&
             (getMoveExtend(hashMove, recaptureSquare) <= 0) &&
             (ply + depth / plyScale < MAX_SEARCH_DEPTH) &&
             MoveGen::isLegal(pos, hashMove, inCheck)) {
         SearchTreeInfo& sti2 = searchTreeInfo[ply-1];
-        Move savedMove = sti2.currentMove;
-        int savedMoveNo = sti2.currentMoveNo;
-        S64 savedNodeIdx2 = sti2.nodeIdx;
+        const Move savedMove = sti2.currentMove;
+        const int savedMoveNo = sti2.currentMoveNo;
+        const S64 savedNodeIdx2 = sti2.nodeIdx;
         sti2.currentMove = Move(1,1,0); // Represents "no move"
         sti2.currentMoveNo = -1;
         sti2.nodeIdx = sti.nodeIdx;
-        S64 savedNodeIdx = sti.nodeIdx;
-
+        const S64 savedNodeIdx = sti.nodeIdx;
+        sti.singularMove = hashMove;
+        auto guard = finally([&](){
+            sti.singularMove.setMove(0,0,0,0);
+            sti.nodeIdx = savedNodeIdx;
+            sti2.currentMove = savedMove;
+            sti2.currentMoveNo = savedMoveNo;
+            sti2.nodeIdx = savedNodeIdx2;
+        });
         int newDepth = depth / 2;
         int newBeta = ent.getScore(ply) - 25;
-        sti.singularMove = hashMove;
         int singScore = negaScout(smp, tb, newBeta-1, newBeta, ply, newDepth,
                                   recaptureSquare, inCheck);
-        sti.singularMove.setMove(0,0,0,0);
         if (singScore <= newBeta-1)
             singularExtend = true;
-
-        sti.nodeIdx = savedNodeIdx;
-        sti2.currentMove = savedMove;
-        sti2.currentMoveNo = savedMoveNo;
-        sti2.nodeIdx = savedNodeIdx2;
     }
 
     SplitPointHolder sph(pd, spVec, pending);
@@ -800,6 +847,7 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
         }
     }
 
+    try {
     // Start searching move alternatives
     UndoInfo ui;
     for (int pass = (smp?0:1); pass < 2; pass++) {
@@ -830,7 +878,6 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
             int sVal = std::numeric_limits<int>::min();
             bool mayReduce = (m.score() < 53) && (!isCapture || m.score() < 0) && !isPromotion;
             bool givesCheck = MoveGen::givesCheck(pos, m);
-            bool negSEECheck = (depth > 4*plyScale) && givesCheck && negSEE(m);
             bool doFutility = false;
             if (mayReduce && haveLegalMoves && !givesCheck && !passedPawnPush(pos, m)) {
                 if (normalBound && !isLoseScore(bestScore) && (mi >= lmpMoveCountLimit))
@@ -867,6 +914,7 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
                         }
                     }
                 }
+                bool negSEECheck = (depth > 3*plyScale) && givesCheck && negSEE(m);
                 int newDepth = depth - plyScale + extend - lmr - (negSEECheck ? plyScale : 0);
                 if (isCapture && (givesCheck || (depth + extend) > plyScale)) {
                     // Compute recapture target square, but only if we are not going
@@ -981,6 +1029,22 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
             return bestScore;
         }
     }
+    } catch (const FailHighException& ex) { // Another thread found a move that failed high
+        if (smp) {
+            if (ply != ex.getPly())
+                throw;
+            sph.getPos(pos);
+            posHashListSize = ex.getPosHashListSize();
+            int mi = ex.getMoveNo();
+            int score = ex.getScore();
+            Move& m = moves[mi];
+            m.setScore(score);
+            if (useTT) tt.insert(hKey, m, TType::T_GE, ply, depth, evalScore);
+            logFile.logNodeEnd(sti.nodeIdx, score, TType::T_GE, evalScore, hKey);
+            return score;
+        } else
+            throw;
+    }
     assert(false);
     return 0;
 }
@@ -1020,7 +1084,7 @@ Search::getRootMoves(const MoveList& rootMovesIn,
         if (rootMoves.size == legalMoves.size) {
             // Game mode, handle missing TBs
             std::vector<Move> movesToSearch;
-            if (TBProbe::getSearchMoves(pos, legalMoves, movesToSearch))
+            if (TBProbe::getSearchMoves(pos, legalMoves, movesToSearch, tt))
                 rootMoves.filter(movesToSearch);
         }
     }

@@ -29,11 +29,14 @@
 namespace UciParams {
     std::shared_ptr<Parameters::SpinParam> hash(std::make_shared<Parameters::SpinParam>("Hash", 1, 524288, 16));
     std::shared_ptr<Parameters::CheckParam> ownBook(std::make_shared<Parameters::CheckParam>("OwnBook", false));
+    std::shared_ptr<Parameters::StringParam> bookFile(std::make_shared<Parameters::StringParam>("BookFile", ""));
     std::shared_ptr<Parameters::CheckParam> ponder(std::make_shared<Parameters::CheckParam>("Ponder", true));
     std::shared_ptr<Parameters::CheckParam> analyseMode(std::make_shared<Parameters::CheckParam>("UCI_AnalyseMode", false));
     std::shared_ptr<Parameters::SpinParam> strength(std::make_shared<Parameters::SpinParam>("Strength", 0, 1000, 1000));
     std::shared_ptr<Parameters::SpinParam> threads(std::make_shared<Parameters::SpinParam>("Threads", 1, 64, 1));
     std::shared_ptr<Parameters::SpinParam> multiPV(std::make_shared<Parameters::SpinParam>("MultiPV", 1, 256, 1));
+
+    std::shared_ptr<Parameters::CheckParam> useNullMove(std::make_shared<Parameters::CheckParam>("UseNullMove", true));
 
     std::shared_ptr<Parameters::StringParam> gtbPath(std::make_shared<Parameters::StringParam>("GaviotaTbPath", ""));
     std::shared_ptr<Parameters::SpinParam> gtbCache(std::make_shared<Parameters::SpinParam>("GaviotaTbCache", 1, 2047, 1));
@@ -60,6 +63,7 @@ DEFINE_PARAM(pawnRaceBonus);
 DEFINE_PARAM(passedPawnEGFactor);
 DEFINE_PARAM(RBehindPP1);
 DEFINE_PARAM(RBehindPP2);
+DEFINE_PARAM(activePawnPenalty);
 
 DEFINE_PARAM(QvsRMBonus1);
 DEFINE_PARAM(QvsRMBonus2);
@@ -79,6 +83,7 @@ DEFINE_PARAM(pieceTradeThreshold);
 
 DEFINE_PARAM(threatBonus1);
 DEFINE_PARAM(threatBonus2);
+DEFINE_PARAM(latentAttackBonus);
 
 DEFINE_PARAM(rookHalfOpenBonus);
 DEFINE_PARAM(rookOpenBonus);
@@ -363,7 +368,7 @@ ParamTable<64> qt2b { -200, 200, useUciParam,
 };
 ParamTableMirrored<64> qt2w(qt2b);
 
-/** Piece/square table for rooks during end game. */
+/** Piece/square table for rooks during middle game. */
 ParamTable<64> rt1b { -200, 200, useUciParam,
     {  39,  45,  36,  36,  39,  58,  54,  63,
        34,  36,  47,  53,  47,  53,  57,  47,
@@ -558,6 +563,16 @@ ParamTable<14> kingAttackWeight { 0, 400, useUciParam,
     {  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13 }
 };
 
+ParamTable<5> qContactCheckBonus { -1000, 1000, useUciParam,
+    {-559,-286,  0, 286, 559 },
+    {  -2,  -1,  0,   1,   2 }
+};
+
+ParamTable<7> pieceKingAttackBonus { -1000, 1000, useUciParam,
+    {-15, -7, -2,  0,  2,  7, 15 },
+    { -3, -2, -1,  0,  1,  2,  3 }
+};
+
 ParamTable<5> kingPPSupportK { 0, 200, useUciParam,
     { 47, 71, 65, 56, 98 },
     {  1,  2,  3,  4,  5 }
@@ -595,11 +610,14 @@ Parameters::Parameters() {
 
     addPar(UciParams::hash);
     addPar(UciParams::ownBook);
+    addPar(UciParams::bookFile);
     addPar(UciParams::ponder);
     addPar(UciParams::analyseMode);
     addPar(UciParams::strength);
     addPar(UciParams::threads);
     addPar(UciParams::multiPV);
+
+    addPar(UciParams::useNullMove);
 
     addPar(UciParams::gtbPath);
     addPar(UciParams::gtbCache);
@@ -623,6 +641,7 @@ Parameters::Parameters() {
     REGISTER_PARAM(passedPawnEGFactor, "PassedPawnEGFactor");
     REGISTER_PARAM(RBehindPP1, "RookBehindPassedPawn1");
     REGISTER_PARAM(RBehindPP2, "RookBehindPassedPawn2");
+    REGISTER_PARAM(activePawnPenalty, "ActivePawnPenalty");
 
     REGISTER_PARAM(QvsRMBonus1, "QueenVsRookMinorBonus1");
     REGISTER_PARAM(QvsRMBonus2, "QueenVsRookMinorBonus2");
@@ -642,6 +661,7 @@ Parameters::Parameters() {
 
     REGISTER_PARAM(threatBonus1, "ThreatBonus1");
     REGISTER_PARAM(threatBonus2, "ThreatBonus2");
+    REGISTER_PARAM(latentAttackBonus, "LatentAttackBonus");
 
     REGISTER_PARAM(rookHalfOpenBonus, "RookHalfOpenBonus");
     REGISTER_PARAM(rookOpenBonus, "RookOpenBonus");
@@ -720,6 +740,8 @@ Parameters::Parameters() {
     pawnShelterTable.registerParams("PawnShelterTable", *this);
     pawnStormTable.registerParams("PawnStormTable", *this);
     kingAttackWeight.registerParams("KingAttackWeight", *this);
+    qContactCheckBonus.registerParams("QueenContactCheckBonus", *this);
+    pieceKingAttackBonus.registerParams("PieceKingAttackBonus", *this);
     kingPPSupportK.registerParams("KingPassedPawnSupportK", *this);
     kingPPSupportP.registerParams("KingPassedPawnSupportP", *this);
     pawnDoubledPenalty.registerParams("PawnDoubledPenalty", *this);

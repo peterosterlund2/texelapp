@@ -65,6 +65,22 @@ public:
     }
 };
 
+/** Helper class to run code when a variable goes out of scope. */
+template <typename Func>
+class Finally {
+public:
+    Finally(Func func) : f(func) {}
+    ~Finally() { f(); }
+private:
+    Func f;
+};
+
+/** Run code when a variable goes out of scope. */
+template <typename Func>
+Finally<Func> finally(Func f) {
+    return Finally<Func>(f);
+}
+
 template <typename T>
 T clamp(T val, T min, T max) {
     if (val < min)
@@ -185,7 +201,7 @@ contains(const std::vector<T>& v, const T& e) {
 
 /** Return true if vector v contains element e converted to a string. */
 inline bool
-contains(const std::vector<std::string> v, const char* e) {
+contains(const std::vector<std::string>& v, const char* e) {
     return contains(v, std::string(e));
 }
 
