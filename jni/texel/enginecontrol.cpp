@@ -200,12 +200,12 @@ EngineControl::computeTimeLimit(const SearchParams& sPar) {
             int inc  = white ? sPar.wInc : sPar.bInc;
             const int margin = std::min(static_cast<int>(bufferTime), time * 9 / 10);
             int timeLimit = (time + inc * (moves - 1) - margin) / moves;
-            minTimeLimit = (int)(timeLimit * minTimeUsage * 0.01);
+            minTimeLimit = timeLimit;
             if (UciParams::ponder->getBoolPar()) {
                 const double ponderHitRate = timePonderHitRate * 0.01;
                 minTimeLimit = (int)ceil(minTimeLimit / (1 - ponderHitRate));
             }
-            maxTimeLimit = (int)(minTimeLimit * clamp(moves * 0.5, 2.5, static_cast<int>(maxTimeUsage) * 0.01));
+            maxTimeLimit = (int)(minTimeLimit * clamp(moves * 0.5, 2.0, static_cast<int>(maxTimeUsage) * 0.01));
 
             // Leave at least 1s on the clock, but can't use negative time
             minTimeLimit = clamp(minTimeLimit, 1, time - margin);
@@ -218,7 +218,7 @@ void
 EngineControl::startThread(int minTimeLimit, int maxTimeLimit, int maxDepth, int maxNodes) {
     Search::SearchTables st(tt, kt, ht, *et);
     sc = std::make_shared<Search>(pos, posHashList, posHashListSize, st, pd, nullptr, treeLog);
-    sc->setListener(std::make_shared<SearchListener>(os));
+    sc->setListener(make_unique<SearchListener>(os));
     sc->setStrength(UciParams::strength->getIntPar(), randomSeed);
     std::shared_ptr<MoveList> moves(std::make_shared<MoveList>());
     MoveGen::pseudoLegalMoves(pos, *moves);
@@ -242,7 +242,6 @@ EngineControl::startThread(int minTimeLimit, int maxTimeLimit, int maxDepth, int
     pd.wq.resetSplitDepth();
     pd.startAll();
     sc->timeLimit(minTimeLimit, maxTimeLimit);
-    tt.nextGeneration();
     bool ownBook = UciParams::ownBook->getBoolPar();
     bool analyseMode = UciParams::analyseMode->getBoolPar();
     int maxPV = (infinite || analyseMode) ? UciParams::multiPV->getIntPar() : 1;
@@ -254,6 +253,8 @@ EngineControl::startThread(int minTimeLimit, int maxTimeLimit, int maxDepth, int
         ss.precision(2);
         ss << std::fixed << (evScore / 100.0);
         os << "info string Eval: " << ss.str() << std::endl;
+    } else {
+        tt.nextGeneration();
     }
     auto f = [this,ownBook,analyseMode,moves,maxDepth,maxNodes,maxPV,minProbeDepth]() {
         Numa::instance().bindThread(0);

@@ -44,7 +44,7 @@ Search::Search(const Position& pos0, const std::vector<U64>& posHashList0,
                TreeLogger& logFile0)
     : eval(st.et), kt(st.kt), ht(st.ht), tt(st.tt), pd(pd0), threadNo(0),
       mainNumaNode(true), logFile(logFile0) {
-    stopHandler = std::make_shared<DefaultStopHandler>(*this);
+    stopHandler = make_unique<DefaultStopHandler>(*this);
     spVec.push_back(rootSp);
     init(pos0, posHashList0, posHashListSize0);
 }
@@ -260,7 +260,7 @@ Search::iterativeDeepening(const MoveList& scMovesIn,
             std::cout << ss.str() << std::endl;
         }
         if (maxTimeMillis >= 0)
-            if (tNow - tStart >= minTimeMillis)
+            if (tNow - tStart > minTimeMillis * 0.01 * minTimeUsage)
                 break;
         if (depthS >= maxDepth * plyScale)
             break;
@@ -652,7 +652,7 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
         } else {
             nullOk = (pos.bMtrl() > pos.bMtrlPawns()) && (pos.bMtrlPawns() > 0);
         }
-        const int R = (depth > 6*plyScale) ? 4*plyScale : 3*plyScale;
+        const int R = std::min(depth, 4*plyScale);
         if (nullOk) {
             if (((ent.getType() == TType::T_EXACT) || (ent.getType() == TType::T_LE)) &&
                 (ent.getDepth() >= depth - R) && (ent.getScore(ply) < beta))
@@ -788,6 +788,7 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
             hashMoveSelected && !singularSearch &&
             (ent.getType() != TType::T_LE) &&
             (ent.getDepth() >= depth - 3 * plyScale) &&
+            (!isWinScore(std::abs(ent.getScore(ply))) || !normalBound) &&
             (getMoveExtend(hashMove, recaptureSquare) <= 0) &&
             (ply + depth / plyScale < MAX_SEARCH_DEPTH) &&
             MoveGen::isLegal(pos, hashMove, inCheck)) {
@@ -909,7 +910,7 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
                             lmr = 3*plyScale;
                         } else if ((lmrCount > lmrMoveCountLimit1) && (depth > 3*plyScale) && !isCapture) {
                             lmr = 2*plyScale;
-                        } else {
+                        } else if (mi >= 2) {
                             lmr = 1*plyScale;
                         }
                     }
@@ -993,8 +994,16 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
                                 ht.addFail(pos, m2, depth/plyScale);
                         }
                     }
-                    if (useTT) tt.insert(hKey, m, TType::T_GE, ply, depth, evalScore);
-                    logFile.logNodeEnd(sti.nodeIdx, alpha, TType::T_GE, evalScore, hKey);
+                    if (((ent.getType() == TType::T_EXACT || ent.getType() == TType::T_LE)) &&
+                            (ent.getScore(ply) < beta) && isLoseScore(ent.getScore(ply))) {
+                        score = ent.getScore(ply);
+                        emptyMove.setScore(score);
+                        if (useTT) tt.insert(hKey, emptyMove, TType::T_LE, ply, depth, evalScore);
+                        logFile.logNodeEnd(sti.nodeIdx, score, TType::T_LE, evalScore, hKey);
+                    } else {
+                        if (useTT) tt.insert(hKey, m, TType::T_GE, ply, depth, evalScore);
+                        logFile.logNodeEnd(sti.nodeIdx, alpha, TType::T_GE, evalScore, hKey);
+                    }
                     return alpha;
                 }
                 b = alpha + 1;
@@ -1022,9 +1031,18 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
                 if (useTT) tt.insert(hKey, moves[bestMove], TType::T_EXACT, ply, depth, evalScore);
                 logFile.logNodeEnd(sti.nodeIdx, bestScore, TType::T_EXACT, evalScore, hKey);
             } else {
-                emptyMove.setScore(bestScore);
-                if (useTT) tt.insert(hKey, emptyMove, TType::T_LE, ply, depth, evalScore);
-                logFile.logNodeEnd(sti.nodeIdx, bestScore, TType::T_LE, evalScore, hKey);
+                if (((ent.getType() == TType::T_EXACT || ent.getType() == TType::T_GE)) &&
+                        (ent.getScore(ply) > alpha) && isWinScore(ent.getScore(ply))) {
+                    bestScore = ent.getScore(ply);
+                    ent.getMove(hashMove);
+                    hashMove.setScore(bestScore);
+                    if (useTT) tt.insert(hKey, hashMove, TType::T_GE, ply, depth, evalScore);
+                    logFile.logNodeEnd(sti.nodeIdx, bestScore, TType::T_GE, evalScore, hKey);
+                } else {
+                    emptyMove.setScore(bestScore);
+                    if (useTT) tt.insert(hKey, emptyMove, TType::T_LE, ply, depth, evalScore);
+                    logFile.logNodeEnd(sti.nodeIdx, bestScore, TType::T_LE, evalScore, hKey);
+                }
             }
             return bestScore;
         }

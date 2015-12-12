@@ -27,12 +27,17 @@
 #define TBPROBE_HPP_
 
 #include "transpositionTable.hpp"
-#include "moveGen.hpp"
+#include "position.hpp"
 
 #include <string>
 
 
-class Position;
+class MoveList;
+
+namespace TBProbeData {
+    /** Maximum number of pieces in any tablebase. */
+    extern int maxPieces;
+}
 
 /**
  * Handle tablebase probing.
@@ -118,6 +123,11 @@ private:
     /** Initialize */
     static void gtbInitialize(const std::string& path, int cacheMB, int wdlFraction);
 
+    static bool tbProbe(Position& pos, int ply, int alpha, int beta,
+                        TranspositionTable& tt,
+                        TranspositionTable::TTEntry& ent,
+                        const int nPieces);
+
     static void initWDLBounds();
     static int getMaxDTZ(int matId);
     static int getMaxSubMate(const Position& pos);
@@ -145,6 +155,16 @@ private:
     /** Probe GTB and on-demand TBs to find a DTM score. */
     static bool dtmProbe(Position& pos, int ply, TranspositionTable& tt, int& score);
 };
+
+inline bool
+TBProbe::tbProbe(Position& pos, int ply, int alpha, int beta,
+                 TranspositionTable& tt,
+                 TranspositionTable::TTEntry& ent) {
+    const int nPieces = pos.nPieces();
+    if (nPieces > TBProbeData::maxPieces)
+        return false;
+    return tbProbe(pos, ply, alpha, beta, tt, ent, nPieces);
+}
 
 
 #endif /* TBPROBE_HPP_ */
