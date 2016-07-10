@@ -1,6 +1,6 @@
 /*
     Texel - A UCI chess engine.
-    Copyright (C) 2013-2014  Peter Österlund, peterosterlund2@gmail.com
+    Copyright (C) 2013-2015  Peter Österlund, peterosterlund2@gmail.com
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -212,7 +212,7 @@ WorkerThread::mainLoop(int minProbeDepth) {
 //            log([&](std::ostream& os){os << "th:" << threadNo << " seqNo:" << sp->getSeqNo() << " ply:" << ply
 //                                         << " c:" << sp->getCurrMoveNo() << " m:" << moveNo
 //                                         << " a:" << alpha << " b:" << beta
-//                                         << " d:" << depth/SearchConst::plyScale
+//                                         << " d:" << depth
 //                                         << " p:" << sp->getPMoveUseful(pd.fhInfo, moveNo) << " start";});
 //            uTimer.setPUseful(pUseful);
             const bool smp = pd.numHelperThreads() > 1;
@@ -229,7 +229,7 @@ WorkerThread::mainLoop(int minProbeDepth) {
 //            log([&](std::ostream& os){os << "th:" << threadNo << " seqNo:" << sp->getSeqNo() << " ply:" << ply
 //                                         << " c:" << sp->getCurrMoveNo() << " m:" << moveNo
 //                                         << " a:" << alpha << " b:" << beta << " s:" << score
-//                                         << " d:" << depth/SearchConst::plyScale << " n:" << sc.getTotalNodesThisThread();});
+//                                         << " d:" << depth << " n:" << sc.getTotalNodesThisThread();});
             pd.wq.moveFinished(sp, moveNo, cancelRemaining, score);
             if (cancelRemaining)
                 pd.setHelperFailHigh(sp->owningThread(), true);

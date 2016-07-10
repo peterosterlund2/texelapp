@@ -1,6 +1,6 @@
 /*
     Texel - A UCI chess engine.
-    Copyright (C) 2012-2014  Peter Österlund, peterosterlund2@gmail.com
+    Copyright (C) 2012-2016  Peter Österlund, peterosterlund2@gmail.com
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,7 +29,6 @@
 namespace SearchConst {
     const int MATE0 = 32000;
     const int UNKNOWN_SCORE = -32767; // Represents unknown static eval score
-    const int plyScale = 8;           // Fractional ply resolution
     const int MIN_SMP_DEPTH = 7;      // Minimum depth for SMP work sharing
     const int MAX_SP_PER_THREAD = 32; // Maximum number of SplitPoints per thread
 

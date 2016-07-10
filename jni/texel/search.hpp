@@ -1,6 +1,6 @@
 /*
     Texel - A UCI chess engine.
-    Copyright (C) 2012-2014  Peter Österlund, peterosterlund2@gmail.com
+    Copyright (C) 2012-2016  Peter Österlund, peterosterlund2@gmail.com
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -101,7 +101,7 @@ public:
     /** Set which thread is owning this Search object. */
     void setThreadNo(int tNo);
 
-    void timeLimit(int minTimeLimit, int maxTimeLimit);
+    void timeLimit(int minTimeLimit, int maxTimeLimit, int earlyStopPercent = -1);
 
     void setStrength(int strength, U64 randomSeed);
 
@@ -150,6 +150,12 @@ public:
 
     /** Get number of TB hits for this thread. */
     S64 getTbHitsThisThread() const;
+
+    /**
+     * Static exchange evaluation function.
+     * @return SEE score for m. Positive value is good for the side that makes the first move.
+     */
+    static int SEE(Position& pos, const Move& m);
 
 private:
     void init(const Position& pos0, const std::vector<U64>& posHashList0,
@@ -274,6 +280,7 @@ private:
     S64 tStart;                // Time when search started
     RelaxedShared<S64> minTimeMillis; // Minimum recommended thinking time
     RelaxedShared<S64> maxTimeMillis; // Maximum allowed thinking time
+    int earlyStopPercentage;   // Can stop searching after this many percent of minTimeMillis
     bool searchNeedMoreTime;   // True if negaScout should use up to maxTimeMillis time.
     S64 maxNodes;              // Maximum number of nodes to search (approximately)
     int minProbeDepth;         // Minimum depth to probe endgame tablebases.
@@ -334,14 +341,19 @@ Search::passedPawnPush(const Position& pos, const Move& m) {
             return false;
         if ((BitBoard::wPawnBlockerMask[m.to()] & pos.pieceTypeBB(Piece::BPAWN)) != 0)
             return false;
-        return m.to() >= 40;
+        return m.to() >= A6;
     } else {
         if (p != Piece::BPAWN)
             return false;
         if ((BitBoard::bPawnBlockerMask[m.to()] & pos.pieceTypeBB(Piece::WPAWN)) != 0)
             return false;
-        return m.to() <= 23;
+        return m.to() <= H3;
     }
+}
+
+inline int
+Search::SEE(const Move& m) {
+    return SEE(pos, m);
 }
 
 inline int
@@ -401,9 +413,9 @@ Search::negaScout(bool smp, bool tb,
                   int alpha, int beta, int ply, int depth, int recaptureSquare,
                   const bool inCheck) {
     using namespace SearchConst;
-    int minDepth = pd.wq.getMinSplitDepth() * plyScale;
+    int minDepth = pd.wq.getMinSplitDepth();
     if (threadNo == 0)
-        minDepth = (minDepth + MIN_SMP_DEPTH * plyScale) / 2;
+        minDepth = (minDepth + MIN_SMP_DEPTH) / 2;
     if (smp && (depth >= minDepth) &&
                ((int)spVec.size() < MAX_SP_PER_THREAD)) {
         bool tb2 = tb && depth >= minProbeDepth;
@@ -453,7 +465,7 @@ Search::getTbHitsThisThread() const {
 
 inline void
 Search::setMinProbeDepth(int depth) {
-    minProbeDepth = depth * SearchConst::plyScale;
+    minProbeDepth = depth;
 }
 
 #endif /* SEARCH_HPP_ */
