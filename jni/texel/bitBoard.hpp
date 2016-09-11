@@ -232,7 +232,7 @@ BitBoard::bitCount(U64 mask) {
 #ifdef HAS_POPCNT
     if (sizeof(U64) == sizeof(long))
         return __builtin_popcountl(mask);
-    else if (sizeof(U64) == sizeof(long long))
+    else if (sizeof(U64) == 2*sizeof(long))
         return __builtin_popcountl(mask >> 32) +
                __builtin_popcountl(mask & 0xffffffffULL);
 #endif

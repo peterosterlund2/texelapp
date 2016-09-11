@@ -141,19 +141,23 @@ Search::iterativeDeepening(const MoveList& scMovesIn,
         initNodeStats();
         if (listener) listener->notifyDepth(depth);
         int aspirationDelta = 0;
-        int alpha = 0;
         UndoInfo ui;
         bool needMoreTime = false;
         for (int mi = 0; mi < (int)rootMoves.size(); mi++) {
             posHashFirstNew = posHashFirstNew0 + ((maxPV > 1) ? 1 : 0);
             if (mi < maxPV)
                 aspirationDelta = isWinScore(std::abs(rootMoves[mi].score())) ? 3000 : aspirationWindow;
-            if (firstIteration)
+            int alpha, beta;
+            if (firstIteration) {
                 alpha = -MATE0;
-            else if (mi < maxPV)
+                beta = MATE0;
+            } else if (mi < maxPV) {
                 alpha = std::max(rootMoves[mi].score() - aspirationDelta, -MATE0);
-            else
+                beta  = std::min(rootMoves[mi].score() + aspirationDelta, MATE0);
+            } else {
                 alpha = rootMoves[maxPV-1].score();
+                beta = alpha + 1;
+            }
 
             searchNeedMoreTime = (mi > 0);
             Move& m = rootMoves[mi].move;
@@ -163,13 +167,6 @@ Search::iterativeDeepening(const MoveList& scMovesIn,
             S64 nodesThisMove = -totalNodes;
             posHashList[posHashListSize++] = pos.zobristHash();
             bool givesCheck = MoveGen::givesCheck(pos, m);
-            int beta;
-            if (firstIteration)
-                beta = MATE0;
-            else if (mi < maxPV)
-                beta = std::min(rootMoves[mi].score() + aspirationDelta, MATE0);
-            else
-                beta = alpha + 1;
 
             int lmrS = 0;
             bool isCapture = (pos.getPiece(m.to()) != Piece::EMPTY);
@@ -408,7 +405,8 @@ Search::notifyStats() {
         S64 totNodes = getTotalNodes();
         int nps = (time > 0) ? (int)(totNodes / (time / 1000.0)) : 0;
         S64 tbHits = getTbHits();
-        listener->notifyStats(totNodes, nps, tbHits, time);
+        int hashFull = tt.getHashFull();
+        listener->notifyStats(totNodes, nps, hashFull, tbHits, time);
     }
     tLastStats = tNow;
 }
@@ -664,7 +662,8 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
     }
 
     // Null-move pruning
-    if ((depth >= 3) && !inCheck && sti.allowNullMove && !isWinScore(beta) && !singularSearch) {
+    if ((depth >= 3) && !inCheck && sti.allowNullMove && !isWinScore(beta) &&
+            !singularSearch && (beta == alpha + 1)) {
         bool nullOk;
         if (pos.isWhiteMove()) {
             nullOk = (pos.wMtrl() > pos.wMtrlPawns()) && (pos.wMtrlPawns() > 0);
@@ -701,14 +700,16 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
                 pos.setEpSquare(-1);
                 searchTreeInfo[ply+1].allowNullMove = false;
                 searchTreeInfo[ply+1].bestMove.setMove(0,0,0,0);
-                auto guard = finally([this,ply]() {
+                int hmc = pos.getHalfMoveClock();
+                pos.setHalfMoveClock(0);
+                auto guard = finally([this,ply,hmc]() {
                     searchTreeInfo[ply+1].allowNullMove = true;
+                    pos.setHalfMoveClock(hmc);
                 });
                 score = -negaScout(smp, tb, -beta, -(beta - 1), ply + 1, depth - R, -1, false);
                 pos.setEpSquare(epSquare);
                 pos.setWhiteMove(!pos.isWhiteMove());
             }
-            bool storeInHash = true;
             if ((score >= beta) && (depth >= 10)) {
                 // Null-move verification search
                 SearchTreeInfo& sti2 = searchTreeInfo[ply-1];
@@ -730,7 +731,6 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
                     sti3.bestMove.setMove(0,0,0,0);
                 });
                 score = negaScout(smp, tb, beta - 1, beta, ply, depth - R, recaptureSquare, inCheck);
-                storeInHash = false;
             }
             if (smp && (depth - R >= MIN_SMP_DEPTH))
                 pd.fhInfo.addData(-1, searchTreeInfo[ply+1].currentMoveNo, score < beta, false);
@@ -738,8 +738,7 @@ Search::negaScout(int alpha, int beta, int ply, int depth, int recaptureSquare,
                 if (isWinScore(score))
                     score = beta;
                 emptyMove.setScore(score);
-                if (storeInHash)
-                    if (useTT) tt.insert(hKey, emptyMove, TType::T_GE, ply, depth, evalScore);
+                if (useTT) tt.insert(hKey, emptyMove, TType::T_GE, ply, depth, evalScore);
                 logFile.logNodeEnd(sti.nodeIdx, score, TType::T_GE, evalScore, hKey);
                 return score;
             }

@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.petero.texelchessengine"
     android:versionCode="7"
-    android:versionName="1.06" >
+    android:versionName="1.07a6" >
 
     <uses-sdk
         android:minSdkVersion="16"
