@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <enginelist>
     <engine
-        name="Texel 1.07a37"
+        name="Texel 1.07"
         filename="libtexel.so"
-        target="armeabi-v7a|arm64-v8a|x86|x86_64|mips64">
+        target="armeabi|armeabi-v7a|arm64-v8a|x86|x86_64|mips|mips64">
     </engine>
 </enginelist>

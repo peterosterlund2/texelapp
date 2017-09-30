@@ -3,6 +3,8 @@
     <target name="copy_texel">
         <copy file="${basedir}/libs/arm64-v8a/texel"   tofile="${basedir}/libs/arm64-v8a/libtexel.so"/>
         <copy file="${basedir}/libs/armeabi-v7a/texel" tofile="${basedir}/libs/armeabi-v7a/libtexel.so"/>
+        <copy file="${basedir}/libs/armeabi/texel"     tofile="${basedir}/libs/armeabi/libtexel.so"/>
+        <copy file="${basedir}/libs/mips/texel"        tofile="${basedir}/libs/mips/libtexel.so"/>
         <copy file="${basedir}/libs/mips64/texel"      tofile="${basedir}/libs/mips64/libtexel.so"/>
         <copy file="${basedir}/libs/x86/texel"         tofile="${basedir}/libs/x86/libtexel.so"/>
         <copy file="${basedir}/libs/x86_64/texel"      tofile="${basedir}/libs/x86_64/libtexel.so"/>
