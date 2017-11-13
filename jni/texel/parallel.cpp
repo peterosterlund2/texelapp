@@ -197,12 +197,8 @@ Communicator::forwardStopAck() {
 void
 Communicator::sendQuitAck() {
     quitAckWaitChildren--;
-    if (hasQuitAck()) {
-        if (parent)
-            parent->doSendQuitAck();
-        else
-            notifyThread();
-    }
+    if (parent && hasQuitAck())
+        parent->doSendQuitAck();
 }
 
 void
@@ -299,7 +295,6 @@ U8*
 Communicator::AssignThreadsCommand::toByteBuf(U8* buffer) const {
     buffer = Command::toByteBuf(buffer);
     return Serializer::serialize<64>(buffer, nThreads, firstThreadNo);
-    return buffer;
 }
 
 const U8*
@@ -629,7 +624,8 @@ WorkerThread::mainLoop(Communicator* parentComm, bool cluster) {
     CommHandler handler(*this);
 
     while (true) {
-        threadNotifier.wait(Cluster::instance().isEnabled() ? 1 : -1);
+        bool handleClusterComm = Cluster::instance().isEnabled() && threadNo == 0;
+        threadNotifier.wait(handleClusterComm ? 1 : -1);
         if (terminate)
             break;
         comm->poll(handler);
@@ -703,11 +699,7 @@ WorkerThread::CommHandler::setParam(const std::string& name, const std::string& 
 
 void
 WorkerThread::CommHandler::quit() {
-    if (wt.getThreadNo() == 0)
-        wt.comm->sendQuit();
-    else {
-        wt.comm->forwardQuitAck();
-    }
+    wt.comm->sendQuit();
 }
 
 void
