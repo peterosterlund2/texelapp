@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="org.petero.texelchessengine"
-    android:versionCode="8"
+    package="org.petero.texelchessengine107"
+    android:versionCode="1"
     android:versionName="1.07" >
 
     <uses-sdk
@@ -14,18 +14,18 @@
         android:theme="@style/AppTheme" >
 
         <activity
-            android:name="org.petero.texelchessengine.TexelActivity"
+            android:name="org.petero.texelchessengine107.TexelActivity"
             android:label="Texel Chess Engine">
             <intent-filter>
                 <action android:name="intent.chess.provider.ENGINE" />
             </intent-filter>
             <meta-data
                 android:name="chess.provider.engine.authority"
-                android:value="org.petero.texelchessengine.TexelEngineProvider" />
+                android:value="org.petero.texelchessengine107.TexelEngineProvider" />
         </activity>
         <provider
-            android:name="org.petero.texelchessengine.TexelEngineProvider"
-            android:authorities="org.petero.texelchessengine.TexelEngineProvider"
+            android:name="org.petero.texelchessengine107.TexelEngineProvider"
+            android:authorities="org.petero.texelchessengine107.TexelEngineProvider"
             android:exported="true" />
     </application>
 </manifest>

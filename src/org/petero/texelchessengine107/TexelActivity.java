@@ -1,4 +1,4 @@
-package org.petero.texelchessengine;
+package org.petero.texelchessengine107;
 
 import android.app.Activity;
 import android.os.Bundle;

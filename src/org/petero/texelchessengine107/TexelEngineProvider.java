@@ -1,4 +1,4 @@
-package org.petero.texelchessengine;
+package org.petero.texelchessengine107;
 
 import com.kalab.chess.enginesupport.ChessEngineProvider;
 
