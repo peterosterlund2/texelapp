@@ -42,10 +42,12 @@
 #include <iostream>
 #include <memory>
 #include <chrono>
+#include <fstream>
+#include <regex>
 
 
 EngineMainThread::EngineMainThread()
-    : tt(8) {
+    : tt(256) {
     Communicator* clusterParent = Cluster::instance().createParentCommunicator(tt);
     comm = make_unique<ThreadCommunicator>(clusterParent, tt, notifier, true);
     Cluster::instance().createChildCommunicators(comm.get(), tt);
@@ -121,20 +123,14 @@ EngineMainThread::setupTT() {
     int hashSizeMB = UciParams::hash->getIntPar();
     U64 nEntries = hashSizeMB > 0 ? ((U64)hashSizeMB) * (1 << 20) / sizeof(TranspositionTable::TTEntry)
                                   : (U64)1024;
-    int logSize = 0;
-    while (nEntries > 1) {
-        logSize++;
-        nEntries /= 2;
-    }
-    logSize++;
     while (true) {
         try {
-            logSize--;
-            if (logSize <= 0)
+            if (nEntries < 1)
                 break;
-            tt.reSize(logSize);
+            tt.reSize(nEntries);
             break;
         } catch (const std::bad_alloc& ex) {
+            nEntries /= 2;
         }
     }
 }
@@ -268,7 +264,7 @@ EngineMainThread::setOptions() {
             const std::string& optionName = p.first;
             std::string optionValue = p.second;
             std::shared_ptr<Parameters::ParamBase> par = params.getParam(optionName);
-            if (par && par->type == Parameters::STRING && optionValue == "<empty>")
+            if (par && par->getType() == Parameters::STRING && optionValue == "<empty>")
                 optionValue.clear();
             params.set(optionName, optionValue);
             comm->sendSetParam(optionName, optionValue);
@@ -290,12 +286,21 @@ EngineControl::EngineControl(std::ostream& o, EngineMainThread& engineThread0,
         ht.init();
         engineThread.setClearHistory();
     }, false);
+    opponentParListenerId = UciParams::opponent->addListener([this]() {
+        setOpponent();
+    });
+    contemptFileParListenerId = UciParams::contemptFile->addListener([this]() {
+        setOpponent();
+    }, false);
+
     et = Evaluate::getEvalHashTables();
 }
 
 EngineControl::~EngineControl() {
     UciParams::hash->removeListener(hashParListenerId);
-    UciParams::hash->removeListener(clearHashParListenerId);
+    UciParams::clearHash->removeListener(clearHashParListenerId);
+    UciParams::opponent->removeListener(opponentParListenerId);
+    UciParams::contemptFile->removeListener(contemptFileParListenerId);
 }
 
 void
@@ -366,7 +371,7 @@ EngineControl::computeTimeLimit(const SearchParams& sPar) {
 
         if (sPar.moveTime > 0) {
              minTimeLimit = maxTimeLimit = sPar.moveTime;
-             earlyStopPercentage = 100; // Don't stop search early if asked to search a fixed amount of time
+             earlyStopPercentage = 10000; // Don't stop search early if asked to search a fixed amount of time
         } else if (sPar.wTime || sPar.bTime) {
             int moves = sPar.movesToGo;
             if (moves == 0)
@@ -379,16 +384,59 @@ EngineControl::computeTimeLimit(const SearchParams& sPar) {
             int timeLimit = (time + inc * (moves - 1) - margin) / moves;
             minTimeLimit = timeLimit;
             if (UciParams::ponder->getBoolPar()) {
-                const double ponderHitRate = timePonderHitRate * 0.01;
-                minTimeLimit = (int)ceil(minTimeLimit / (1 - ponderHitRate));
+                int oTime = white ? sPar.bTime : sPar.wTime;
+                int oInc  = white ? sPar.bInc : sPar.wInc;
+                double oTimeLimit = (oTime + oInc * (moves - 1) - margin) / moves;
+                double k = timePonderHitRate * 0.01;
+                minTimeLimit += (int)(std::min(oTimeLimit, timeLimit / (1 - k)) * k);
             }
-            maxTimeLimit = (int)(minTimeLimit * clamp(moves * 0.5, 2.0, static_cast<int>(maxTimeUsage) * 0.01));
+            maxTimeLimit = (int)(minTimeLimit * clamp(moves * 0.5, 2.0, maxTimeUsage * 0.01));
 
             // Leave at least 1s on the clock, but can't use negative time
             minTimeLimit = clamp(minTimeLimit, 1, time - margin);
             maxTimeLimit = clamp(maxTimeLimit, 1, time - margin);
         }
     }
+}
+
+void EngineControl::setOpponent() {
+    opponentBasedContempt = 0;
+    std::string opponent = UciParams::opponent->getStringPar();
+    std::ifstream is(UciParams::contemptFile->getStringPar());
+    while (true) {
+        std::string line;
+        std::getline(is, line);
+        if (!is || is.eof())
+            break;
+        if (startsWith(line, "#"))
+            continue;
+        size_t tabPos = line.find('\t');
+        if (tabPos == std::string::npos)
+            continue;
+
+        std::regex re(line.substr(0, tabPos), std::regex::icase);
+        if (std::regex_match(opponent, re)) {
+            std::string sVal = trim(line.substr(tabPos+1));
+            int val = 0;
+            if (str2Num(sVal, val)) {
+                opponentBasedContempt = val;
+                return;
+            }
+        }
+    }
+}
+
+int EngineControl::getWhiteContempt(bool whiteMove) {
+    if (UciParams::analyseMode->getBoolPar())
+        return UciParams::analyzeContempt->getIntPar();
+    int contempt;
+    if (UciParams::autoContempt->getBoolPar()) {
+        contempt = opponentBasedContempt;
+    } else {
+        contempt = UciParams::contempt->getIntPar();
+    }
+    int ret = whiteMove ? contempt : -contempt;
+    return ret;
 }
 
 void
@@ -423,8 +471,11 @@ EngineControl::startThread(int minTimeLimit, int maxTimeLimit, int earlyStopPerc
     bool analyseMode = UciParams::analyseMode->getBoolPar();
     int maxPV = (infinite || analyseMode) ? UciParams::multiPV->getIntPar() : 1;
     int minProbeDepth = UciParams::minProbeDepth->getIntPar();
+    int whiteContempt = getWhiteContempt(pos.isWhiteMove());
+    sc->setWhiteContempt(whiteContempt);
     if (analyseMode || infinite) {
         Evaluate eval(*et);
+        eval.setWhiteContempt(whiteContempt);
         int evScore = eval.evalPosPrint(pos) * (pos.isWhiteMove() ? 1 : -1);
         std::stringstream ss;
         ss.precision(2);
@@ -504,35 +555,35 @@ EngineControl::printOptions(std::ostream& os) {
     Parameters::instance().getParamNames(parNames);
     for (const auto& pName : parNames) {
         std::shared_ptr<Parameters::ParamBase> p = Parameters::instance().getParam(pName);
-        switch (p->type) {
+        switch (p->getType()) {
         case Parameters::CHECK: {
-            const Parameters::CheckParam& cp = dynamic_cast<const Parameters::CheckParam&>(*p.get());
-            os << "option name " << cp.name << " type check default "
-               << (cp.defaultValue?"true":"false") << std::endl;
+            const Parameters::CheckParam& cp = static_cast<const Parameters::CheckParam&>(*p.get());
+            os << "option name " << cp.getName() << " type check default "
+               << (cp.getDefaultValue() ? "true" : "false") << std::endl;
             break;
         }
         case Parameters::SPIN: {
-            const Parameters::SpinParam& sp = dynamic_cast<const Parameters::SpinParam&>(*p.get());
-            os << "option name " << sp.name << " type spin default "
+            const Parameters::SpinParam& sp = static_cast<const Parameters::SpinParam&>(*p.get());
+            os << "option name " << sp.getName() << " type spin default "
                << sp.getDefaultValue() << " min " << sp.getMinValue()
                << " max " << sp.getMaxValue() << std::endl;
             break;
         }
         case Parameters::COMBO: {
-            const Parameters::ComboParam& cp = dynamic_cast<const Parameters::ComboParam&>(*p.get());
-            os << "option name " << cp.name << " type combo default " << cp.defaultValue;
-            for (size_t i = 0; i < cp.allowedValues.size(); i++)
-                os << " var " << cp.allowedValues[i];
+            const Parameters::ComboParam& cp = static_cast<const Parameters::ComboParam&>(*p.get());
+            os << "option name " << cp.getName() << " type combo default " << cp.getDefaultValue();
+            for (size_t i = 0; i < cp.getAllowedValues().size(); i++)
+                os << " var " << cp.getAllowedValues()[i];
             os << std::endl;
             break;
         }
         case Parameters::BUTTON:
-            os << "option name " << p->name << " type button" << std::endl;
+            os << "option name " << p->getName() << " type button" << std::endl;
             break;
         case Parameters::STRING: {
-            const Parameters::StringParam& sp = dynamic_cast<const Parameters::StringParam&>(*p.get());
-            os << "option name " << sp.name << " type string default "
-               << sp.defaultValue << std::endl;
+            const Parameters::StringParam& sp = static_cast<const Parameters::StringParam&>(*p.get());
+            os << "option name " << sp.getName() << " type string default "
+               << sp.getDefaultValue() << std::endl;
             break;
         }
         }

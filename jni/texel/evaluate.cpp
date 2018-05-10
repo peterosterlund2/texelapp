@@ -85,18 +85,6 @@ Evaluate::staticInitialize() {
     psTab2[Piece::BBISHOP] = bt2b.getTable();
     psTab2[Piece::BKNIGHT] = nt2b.getTable();
     psTab2[Piece::BPAWN]   = pt2b.getTable();
-
-    // Initialize knight/bishop king safety patterns
-    for (int sq = 0; sq < 64; sq++) {
-        const int x = Position::getX(sq);
-        const int y = Position::getY(sq);
-        int dx = (x < 4) ? -1 : 1;
-        int dy = (y < 4) ? 1 : -1;
-        U64 n = getMask(sq, -dx, 0) | getMask(sq, dx, 0) | getMask(sq, 0, dy) | getMask(sq, 0, 2*dy) | getMask(sq, dx, 2*dy);
-        U64 b = getMask(sq, -dx, 0) | getMask(sq, 0, dy) | getMask(sq, dx, 2*dy);
-        knightKingProtectPattern[sq] = n;
-        bishopKingProtectPattern[sq] = b;
-    }
 }
 
 void
@@ -155,8 +143,6 @@ const int* Evaluate::psTab1[Piece::nPieceTypes];
 const int* Evaluate::psTab2[Piece::nPieceTypes];
 
 int Evaluate::knightMobScoreA[64][9];
-U64 Evaluate::knightKingProtectPattern[64];
-U64 Evaluate::bishopKingProtectPattern[64];
 
 Evaluate::Evaluate(EvalHashTables& et)
     : pawnHash(et.pawnHash),
@@ -166,7 +152,8 @@ Evaluate::Evaluate(EvalHashTables& et)
       wKingZone(0), bKingZone(0),
       wKingAttacks(0), bKingAttacks(0),
       wAttacksBB(0), bAttacksBB(0),
-      wPawnAttacks(0), bPawnAttacks(0) {
+      wPawnAttacks(0), bPawnAttacks(0),
+      whiteContempt(0) {
 }
 
 int
@@ -225,6 +212,14 @@ Evaluate::evalPos(const Position& pos) {
     if (mhd->endGame)
         score = EndGameEval::endGameEval<true>(pos, phd->passedPawns, score);
     if (print) std::cout << "info string eval endgame:" << score << std::endl;
+    if ((whiteContempt != 0) && !mhd->endGame) {
+        int mtrlPawns = pos.wMtrlPawns() + pos.bMtrlPawns();
+        int mtrl = pos.wMtrl() + pos.bMtrl();
+        int hiMtrl = (rV + bV*2 + nV*2) * 2;
+        int piecePlay = interpolate(mtrl - mtrlPawns, 0, 64, hiMtrl, 128);
+        score += whiteContempt * piecePlay / 128;
+        if (print) std::cout << "eval contemp:" << score << ' ' << piecePlay << std::endl;
+    }
     if (pos.pieceTypeBB(Piece::WPAWN, Piece::BPAWN)) {
         int hmc = clamp(pos.getHalfMoveClock() / 10, 0, 9);
         score = score * halfMoveFactor[hmc] / 128;
@@ -241,6 +236,9 @@ Evaluate::evalPos(const Position& pos) {
 
     if (!pos.isWhiteMove())
         score = -score;
+
+    // Tempo bonus
+    score += interpolate(tempoBonusEG, tempoBonusMG, mhd->kingSafetyIPF);
 
     if (useHashTable)
         ehd->data = (key & 0xffffffffffff0000ULL) + (score + (1 << 15));
@@ -1248,12 +1246,7 @@ Evaluate::kingSafety(const Position& pos) {
         }
     }
 
-    // Bonus for minor pieces protecting king
-    score += BitBoard::bitCount(Evaluate::knightKingProtectPattern[wKing] & pos.pieceTypeBB(Piece::WKNIGHT)) * knightKingProtectBonus;
-    score += BitBoard::bitCount(Evaluate::bishopKingProtectPattern[wKing] & pos.pieceTypeBB(Piece::WBISHOP)) * bishopKingProtectBonus;
-    score -= BitBoard::bitCount(Evaluate::knightKingProtectPattern[bKing] & pos.pieceTypeBB(Piece::BKNIGHT)) * knightKingProtectBonus;
-    score -= BitBoard::bitCount(Evaluate::bishopKingProtectPattern[bKing] & pos.pieceTypeBB(Piece::BBISHOP)) * bishopKingProtectBonus;
-
+    // Bonus for attacks close to the enemy king
     score += kingAttackWeight[std::min(bKingAttacks, 13)] - kingAttackWeight[std::min(wKingAttacks, 13)];
 
     // Bonus for non-losing queen contact checks
@@ -1396,11 +1389,15 @@ Evaluate::kingSafetyKPPart(const Position& pos) {
         const int kingDiff = std::abs(wKingZone - bKingZone);
         if (kingDiff > 1) {
             U64 m = wPawns & pStormMask[bKingZone];
+            int wNMissing = BitBoard::bitCount(bPawns & pStormMask[bKingZone]) - BitBoard::bitCount(m);
+            score -= pawnStormMissingPenalty[clamp(wNMissing, 0, 3)];
             while (m != 0) {
                 int sq = BitBoard::extractSquare(m);
                 score += pawnStormBonus * (Position::getY(sq)-5);
             }
             m = bPawns & pStormMask[wKingZone];
+            int bNMissing = BitBoard::bitCount(wPawns & pStormMask[wKingZone]) - BitBoard::bitCount(m);
+            score += pawnStormMissingPenalty[clamp(bNMissing, 0, 3)];
             while (m != 0) {
                 int sq = BitBoard::extractSquare(m);
                 score += pawnStormBonus * (Position::getY(sq)-2);
