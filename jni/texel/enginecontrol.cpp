@@ -533,7 +533,6 @@ EngineControl::getPonderMove(Position pos, const Move& m) {
     UndoInfo ui;
     pos.makeMove(m, ui);
     TranspositionTable::TTEntry ent;
-    ent.clear();
     engineThread.getTT().probe(pos.historyHash(), ent);
     if (ent.getType() != TType::T_EMPTY) {
         ent.getMove(ret);
@@ -542,7 +541,7 @@ EngineControl::getPonderMove(Position pos, const Move& m) {
         MoveGen::removeIllegal(pos, moves);
         bool contains = false;
         for (int mi = 0; mi < moves.size; mi++)
-            if (moves[mi].equals(ret)) {
+            if (moves[mi] == ret) {
                 contains = true;
                 break;
             }
