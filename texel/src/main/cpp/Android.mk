@@ -7,4 +7,4 @@ include $(CLEAR_VARS)
 
 #include $(BUILD_SHARED_LIBRARY)
 
-include jni/texel/Android.mk
+include src/main/cpp/texel/Android.mk

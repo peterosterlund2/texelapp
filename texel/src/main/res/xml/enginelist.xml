@@ -3,6 +3,6 @@
     <engine
         name="Texel 1.08a12"
         filename="libtexel.so"
-        target="armeabi|armeabi-v7a|arm64-v8a|x86|x86_64|mips|mips64">
+        target="armeabi-v7a|arm64-v8a|x86|x86_64">
     </engine>
 </enginelist>
