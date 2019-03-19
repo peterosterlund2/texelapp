@@ -61,7 +61,7 @@ dependencies {
     androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'
 }
 
-// Copy texel executables to libs directory
+// Copy texel executables to assets directory
 task copyToAssets(type: Copy, dependsOn: 'externalNativeBuildRelease') {
     from('build/intermediates/ndkBuild/release/obj/local') {
         include '*/texel'
