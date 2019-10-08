@@ -18,10 +18,15 @@ TX_SRC_GTB := gtb/compression/lzma/Lzma86Dec.c gtb/compression/lzma/LzFind.c \
 TX_INC := -I$(LOCAL_PATH)/gtb/sysport -I$(LOCAL_PATH)/gtb/compression \
 	  -I$(LOCAL_PATH)/gtb/compression/lzma -I$(LOCAL_PATH)/syzygy
 
+MY_ARCH_DEF :=
+ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
+  MY_ARCH_DEF += -DHAS_POPCNT
+endif
+
 include $(CLEAR_VARS)
 LOCAL_MODULE    := texel
 LOCAL_SRC_FILES := $(TX_SRC) $(TX_SRC_GTB)
-LOCAL_CFLAGS    := -O3 -fPIE $(TX_INC) -DHAS_CTZ -DHAS_PREFETCH -DHAS_RT -s
+LOCAL_CFLAGS    := -O3 -fPIE $(TX_INC) -DHAS_CTZ -DHAS_PREFETCH -DHAS_RT $(MY_ARCH_DEF) -s
 LOCAL_CPPFLAGS  := -std=c++11
 LOCAL_LDFLAGS	+= -fPIE -pie -s
 LOCAL_CPP_FEATURES := rtti exceptions
