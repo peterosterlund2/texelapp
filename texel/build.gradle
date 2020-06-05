@@ -7,8 +7,8 @@ android {
         applicationId "org.petero.texelchessengine"
         minSdkVersion 21
         targetSdkVersion 28
-        versionCode 13
-        versionName "1.08a13"
+        versionCode 14
+        versionName "1.08a18"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             ndkBuild {
